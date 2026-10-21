@@ -32,7 +32,6 @@ logger = logging.getLogger(__name__)
 
 
 # Local workbook (Google Sheets API removed for speed).
-LOCAL_XLSX = "Booking Data - Health US SL L2 Yes(1).xlsx"
 LOCAL_SAVE_EVERY = 10  # flush to disk every N cell writes
 
 WEBSITE_HEADER = "Website"
@@ -2378,7 +2377,7 @@ def process_websites(worksheet, website_col: int, booking_col: int):
     finally:
         if hasattr(worksheet, 'save'):
             worksheet.save()
-            logger.info(f"Saved workbook: {getattr(worksheet, 'path', LOCAL_XLSX)}")
+            logger.info(f"Saved workbook: {worksheet.path}")
         js_renderer.close()
 
     logger.info(
