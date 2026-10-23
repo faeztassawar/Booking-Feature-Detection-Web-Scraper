@@ -55,6 +55,32 @@ JS_RENDER_TIMEOUT_MS = 15000
 JS_SETTLE_SECONDS = 2
 UC_RENDER_TIMEOUT_SEC = 35
 ALTERNATE_DISCOVERY = True
+# Playwright + SeleniumBase UC (each can spawn Chromium ≈200–500MB+).
+# Turned OFF automatically with --light (needed for multi-process runs).
+ENABLE_JS_RENDER = True
+# Cap stored HTML so BeautifulSoup does not hold multi‑MB pages in RAM.
+MAX_HTML_BYTES = 1_500_000
+
+
+def apply_light_mode() -> None:
+    """Low-RAM settings for running several scrapers in parallel."""
+    global LOCAL_SAVE_EVERY, REQUEST_DELAY, PAGE_FETCH_DELAY
+    global FLAKY_FETCH_ROUNDS, MAX_FETCH_SECONDS, MAX_PAGES_PER_SITE
+    global ALTERNATE_DISCOVERY, ENABLE_JS_RENDER, MAX_HTML_BYTES
+
+    LOCAL_SAVE_EVERY = 40
+    REQUEST_DELAY = 3.0
+    PAGE_FETCH_DELAY = 0.2
+    FLAKY_FETCH_ROUNDS = 2
+    MAX_FETCH_SECONDS = 25
+    MAX_PAGES_PER_SITE = 2
+    ALTERNATE_DISCOVERY = False
+    ENABLE_JS_RENDER = False
+    MAX_HTML_BYTES = 800_000
+    logger.info(
+        "LIGHT MODE: no Playwright/UC browsers, 2 pages/site, "
+        "no alternate discovery, save every 40 writes"
+    )
 
 # Strong interstitial markers — ONLY strings that appear on bot walls, not on
 # normal Cloudflare-backed sites (those embed challenge-platform scripts too).
@@ -1030,6 +1056,13 @@ class WebsiteFetcher:
         self._alt_cache[cache_key] = list(result)
         return result
 
+    @staticmethod
+    def _trim_html(html: str) -> str:
+        """Keep enough HTML for detection without holding multi‑MB pages in RAM."""
+        if html and len(html) > MAX_HTML_BYTES:
+            return html[:MAX_HTML_BYTES]
+        return html
+
     def _handle_response(self, response) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """Normalize a successful HTTP response into (html, url, error).
 
@@ -1052,14 +1085,14 @@ class WebsiteFetcher:
         if status and status >= 400:
             # Real page content slipped through a soft block — use it.
             if html and not challenge and len(html) >= MIN_REAL_PAGE_BYTES:
-                return html, final, None
+                return self._trim_html(html), final, None
             if status in (401, 403, 429) and (challenge or len(html) < MIN_REAL_PAGE_BYTES):
                 return None, None, "Bot protection / captcha challenge"
             return None, None, f"HTTP {status}"
 
         if challenge:
             return None, None, "Bot protection / captcha challenge"
-        return html, final, None
+        return self._trim_html(html), final, None
 
     def fetch(self, url: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """Return (html, final_url, error). Tries https/www/http variants.
@@ -1959,12 +1992,14 @@ class JsRenderer:
 class LocalWorksheet:
     """Minimal gspread-like wrapper over a local .xlsx workbook."""
 
-    def __init__(self, path: str, save_every: int = LOCAL_SAVE_EVERY):
+    def __init__(self, path: str, save_every: Optional[int] = None):
         self.path = path
-        self.wb = load_workbook(path)
+        # keep_links=False reduces openpyxl memory on large sheets.
+        self.wb = load_workbook(path, keep_links=False)
         self.ws = self.wb.active
         self._dirty = 0
-        self._save_every = max(1, save_every)
+        # Read LOCAL_SAVE_EVERY at runtime so --light can raise it.
+        self._save_every = max(1, LOCAL_SAVE_EVERY if save_every is None else save_every)
         logger.info(
             f"Opened local workbook: {path} / tab: {self.ws.title!r} "
             f"({self.ws.max_row} rows)"
@@ -2308,18 +2343,22 @@ def process_websites(worksheet, website_col: int, booking_col: int):
 
     fetcher = WebsiteFetcher()
     detector = BookingDetector()
-    js_renderer = JsRenderer()
-    if js_renderer.available():
-        logger.info("Playwright JS fallback: enabled")
+    js_renderer: Optional[JsRenderer] = None
+    if ENABLE_JS_RENDER:
+        js_renderer = JsRenderer()
+        if js_renderer.available():
+            logger.info("Playwright JS fallback: enabled")
+        else:
+            logger.info("Playwright JS fallback: disabled")
+        if js_renderer.uc_available():
+            logger.info("Cloudflare UC fallback (SeleniumBase): enabled")
+        else:
+            logger.info(
+                "Cloudflare UC fallback: disabled "
+                "(pip install seleniumbase for better CF bypass)"
+            )
     else:
-        logger.info("Playwright JS fallback: disabled")
-    if js_renderer.uc_available():
-        logger.info("Cloudflare UC fallback (SeleniumBase): enabled")
-    else:
-        logger.info(
-            "Cloudflare UC fallback: disabled "
-            "(pip install seleniumbase for better CF bypass)"
-        )
+        logger.info("Playwright/UC browsers: OFF (light mode)")
 
     processed = 0
     skipped_done = 0
@@ -2378,7 +2417,8 @@ def process_websites(worksheet, website_col: int, booking_col: int):
         if hasattr(worksheet, 'save'):
             worksheet.save()
             logger.info(f"Saved workbook: {worksheet.path}")
-        js_renderer.close()
+        if js_renderer is not None:
+            js_renderer.close()
 
     logger.info(
         f"Completed: {processed} written, {skipped_done} already done, {errors} errors"
@@ -2393,10 +2433,21 @@ def main():
     )
     parser.add_argument(
         "workbook",
-        help="Path to the .xlsx file to scrape (e.g. 'Booking Data - Health US SL L2 Yes(1).xlsx')",
+        help="Path to the .xlsx file to scrape",
+    )
+    parser.add_argument(
+        "--light",
+        action="store_true",
+        help=(
+            "Low-RAM mode for parallel runs: no Playwright/UC browsers, "
+            "fewer pages/retries. Prefer this when running multiple terminals."
+        ),
     )
     args = parser.parse_args()
     workbook = args.workbook
+
+    if args.light:
+        apply_light_mode()
 
     logger.info("=" * 60)
     logger.info("Healthcare Website Booking Feature Scraper")
@@ -2428,7 +2479,7 @@ def main():
         logger.info(
             f"Rate limiting: {REQUEST_DELAY}s between sites | "
             f"up to {MAX_PAGES_PER_SITE} pages/site | "
-            f"{MAX_NETWORK_RETRIES} network retries"
+            f"JS render: {'on' if ENABLE_JS_RENDER else 'off'}"
         )
         logger.info("-" * 60)
 
