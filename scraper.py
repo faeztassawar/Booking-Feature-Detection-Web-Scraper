@@ -55,18 +55,22 @@ JS_RENDER_TIMEOUT_MS = 15000
 JS_SETTLE_SECONDS = 2
 UC_RENDER_TIMEOUT_SEC = 35
 ALTERNATE_DISCOVERY = True
-# Playwright + SeleniumBase UC (each can spawn Chromium ≈200–500MB+).
-# Turned OFF automatically with --light (needed for multi-process runs).
+# Playwright Chromium (shared browser, lighter). SeleniumBase UC (extra Chrome,
+# much heavier) is the main RAM risk when running many scrapers in parallel.
 ENABLE_JS_RENDER = True
+ENABLE_UC = True
 # Cap stored HTML so BeautifulSoup does not hold multi‑MB pages in RAM.
 MAX_HTML_BYTES = 1_500_000
 
 
 def apply_light_mode() -> None:
-    """Low-RAM settings for running several scrapers in parallel."""
+    """Low-RAM settings for running several scrapers in parallel.
+
+    Keeps Playwright for JS pages; disables SeleniumBase UC (full Chrome spawn).
+    """
     global LOCAL_SAVE_EVERY, REQUEST_DELAY, PAGE_FETCH_DELAY
     global FLAKY_FETCH_ROUNDS, MAX_FETCH_SECONDS, MAX_PAGES_PER_SITE
-    global ALTERNATE_DISCOVERY, ENABLE_JS_RENDER, MAX_HTML_BYTES
+    global ALTERNATE_DISCOVERY, ENABLE_JS_RENDER, ENABLE_UC, MAX_HTML_BYTES
 
     LOCAL_SAVE_EVERY = 40
     REQUEST_DELAY = 3.0
@@ -75,10 +79,11 @@ def apply_light_mode() -> None:
     MAX_FETCH_SECONDS = 25
     MAX_PAGES_PER_SITE = 2
     ALTERNATE_DISCOVERY = False
-    ENABLE_JS_RENDER = False
+    ENABLE_JS_RENDER = True
+    ENABLE_UC = False
     MAX_HTML_BYTES = 800_000
     logger.info(
-        "LIGHT MODE: no Playwright/UC browsers, 2 pages/site, "
+        "LIGHT MODE: Playwright ON, UC/Chrome bypass OFF, 2 pages/site, "
         "no alternate discovery, save every 40 writes"
     )
 
@@ -1963,11 +1968,16 @@ class JsRenderer:
         html, err = self._render_playwright(url, timeout_ms=timeout_ms)
         if html and not err:
             return html, None
-        needs_uc = allow_uc and bool(err) and (
-            'captcha' in err.lower()
-            or 'bot protection' in err.lower()
-            or 'timeout' in err.lower()
-            or 'js render failed' in err.lower()
+        needs_uc = (
+            ENABLE_UC
+            and allow_uc
+            and bool(err)
+            and (
+                'captcha' in err.lower()
+                or 'bot protection' in err.lower()
+                or 'timeout' in err.lower()
+                or 'js render failed' in err.lower()
+            )
         )
         if needs_uc and self.uc_available():
             uc_html, uc_err = self._render_uc(url)
@@ -2350,15 +2360,17 @@ def process_websites(worksheet, website_col: int, booking_col: int):
             logger.info("Playwright JS fallback: enabled")
         else:
             logger.info("Playwright JS fallback: disabled")
-        if js_renderer.uc_available():
+        if ENABLE_UC and js_renderer.uc_available():
             logger.info("Cloudflare UC fallback (SeleniumBase): enabled")
+        elif not ENABLE_UC:
+            logger.info("Cloudflare UC fallback: OFF (light mode)")
         else:
             logger.info(
                 "Cloudflare UC fallback: disabled "
                 "(pip install seleniumbase for better CF bypass)"
             )
     else:
-        logger.info("Playwright/UC browsers: OFF (light mode)")
+        logger.info("Playwright/UC browsers: OFF")
 
     processed = 0
     skipped_done = 0
@@ -2439,8 +2451,8 @@ def main():
         "--light",
         action="store_true",
         help=(
-            "Low-RAM mode for parallel runs: no Playwright/UC browsers, "
-            "fewer pages/retries. Prefer this when running multiple terminals."
+            "Low-RAM mode for parallel runs: keeps Playwright, disables "
+            "SeleniumBase UC (extra Chrome), fewer pages/retries."
         ),
     )
     args = parser.parse_args()
@@ -2479,7 +2491,8 @@ def main():
         logger.info(
             f"Rate limiting: {REQUEST_DELAY}s between sites | "
             f"up to {MAX_PAGES_PER_SITE} pages/site | "
-            f"JS render: {'on' if ENABLE_JS_RENDER else 'off'}"
+            f"Playwright: {'on' if ENABLE_JS_RENDER else 'off'} | "
+            f"UC: {'on' if ENABLE_UC else 'off'}"
         )
         logger.info("-" * 60)
 
