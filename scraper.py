@@ -133,7 +133,7 @@ MIN_REAL_PAGE_BYTES = 12000
 # finishes blank rows first; uncomment the first DONE_VALUES (and comment the
 # second) when ready to re-scan ERROR rows.
 # DONE_VALUES = {'YES', 'NO', 'SKIP'}  # ERROR omitted → retry ERROR on resume
-DONE_VALUES = {'YES', 'NO', 'SKIP', 'ERROR'}
+DONE_VALUES = {'YES', 'NO', 'SKIP'}
 
 
 def _strip_www(host: str) -> str:
@@ -159,8 +159,12 @@ BOOKING_KEYWORDS = [
     'make a booking', 'book a discovery', 'book discovery', 'online bookings',
     'book here', 'booking online', 'reserve online', 'reserve now',
     'book your session', 'schedule a session', 'book a session',
+    'reserve your session', 'book a class', 'schedule a class',
+    'book your class', 'sign up for a class', 'register for a class',
     'book a consult', 'book a consultation', 'book an assessment',
     'schedule an assessment', 'schedule a screening', 'book a screening',
+    'book a free consultation', 'schedule a free consultation',
+    'free consultation', 'book your free consult',
     # Telehealth / virtual care (common on clinic & therapy sites)
     'virtual visit', 'schedule a virtual visit', 'book a virtual visit',
     'telehealth appointment', 'schedule telehealth', 'book telehealth',
@@ -239,6 +243,8 @@ STRONG_ONLINE_CTAS = [
     'schedule a virtual visit', 'telehealth appointment', 'get care now',
     'start therapy', 'begin therapy', 'new patient appointment',
     'same-day appointment', 'same day appointment', 'online intake',
+    'book a free consultation', 'schedule a free consultation',
+    'book a class', 'schedule a class', 'book your class',
     'make a booking', 'book a call', 'book a discovery', 'book here',
     'reserve now', 'make a reservation', 'online reservation',
     'book a room', 'book your stay', 'book a stay', 'reserve a room',
@@ -274,6 +280,7 @@ STRONG_LINK_LABELS = {
     'request a tour', 'request tour', 'take a tour', 'arrange a tour',
     'virtual visit', 'telehealth', 'get care now', 'start therapy',
     'begin therapy', 'online intake', 'intake form',
+    'free consultation', 'book a class', 'schedule a class',
     # DE / FR / ES / IT / NL
     'termin', 'termine', 'termin buchen', 'jetzt buchen', 'online buchen',
     'buchen', 'reservieren',
@@ -493,6 +500,8 @@ THIRD_PARTY_BOOKING_DOMAINS = [
     'sondermind.com', 'lifestance.com', 'quenza.com', 'upvio.com',
     'practiceq.com', 'pabau.com', 'therapytribe.com', 'mentaltherapy.io',
     'breakthrough.com', 'regrouptherapy.com', 'inclusivehealth.com',
+    'therapyden.com', 'zencare.co', 'openpathcollective.org',
+    'psychologytoday.com/us/therapists',
     # Fitness / studio / franchise
     'momence.com', 'glofox.com', 'arketa.co', 'walla.app', 'classpass.com',
     'punchpass.com', 'zingfit.com', 'marianatek.com', 'mindbody.io',
